@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en" >
+    <head>
+        <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+        <meta name="robots" content="index, follow" />
+        
+        <title>ScriptureEngineIII</title>
+        <link rel="shortcut icon" type="./static/images" href="favicon.ico"/>     
+
+		<script src="./static/javascript/jquery.js"></script>
+		<script>
+			$( document ).ready(function() {
+				window.history.pushState("", "", "§{LinkPrevious}");
+			});
+		</script>
+		<style media="screen" type="text/css">
+			html{
+				padding: 0; /*remove padding */
+				margin: 0; /* remove margins */
+				border: 0; /* remove borders */
+			}
+
+			body{
+				padding: 0; /*remove padding */
+				margin: 0; /* remove margins */
+				border: 0; /* remove borders */
+				background-color: #c8ced3;
+			}			
+			#PageOuterContainer{
+				margin: 0;
+				padding: 0;
+				border: 0;
+			}
+			#ErrorBox{
+				border: 1px solid #444f58;
+				margin-top: 10em;
+				margin-left: auto;
+				margin-right: auto;
+				width: 40em;
+				text-align: center;
+				font-family: arial, sans-serif;
+				background-color: white;
+				padding: 2em;
+			}
+			a{
+				color: #124068;
+				text-decoration: none;
+			}
+			a:hover{
+				color: #124068;
+				text-decoration: underline;
+			}
+			span.ErrHigh{
+				font-weight: bold;
+				color: #a24c4c;
+			}		
+		</style>
+	</head>
+    <body>
+		<div id="PageOuterContainer">
+			<div id="ErrorBox">
+				<p>§{BadBrowserMsg}</p>
+				<p style="font-size: smaller;">§{GainAccessMsg} <a href="§{NewTargetRestart}">§{ThisLinkMsg}</a></p>
+			</div>
+		</div>
+    </body>
+</html>
+
