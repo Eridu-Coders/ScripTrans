@@ -1,8 +1,17 @@
 Utilities
 =========
 
+Application startup
+-------------------
+
 .. automodule:: ScripTrans
    :members:
 
-.. automodule:: ec_utilities
+Utilities proper
+----------------
+
+.. autoclass:: EcLogger
+   :members:
+
+.. autoclass:: EcMailer
    :members:

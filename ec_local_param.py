@@ -17,9 +17,9 @@ class LocalParam:
     gcm_dbServer = 'localhost'
 
     #: Database connection user name
-    gcm_dbUserLocal = ''
+    gcm_dbUserLocal = 'postgres'
     #: Database connection password
-    gcm_dbPasswordLocal = ''
+    gcm_dbPasswordLocal = 'murugan!'
 
     # Logging
     #: If True then maximum level of logging

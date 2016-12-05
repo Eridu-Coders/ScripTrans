@@ -57,8 +57,10 @@ class EcAppParam:
     #: Database password (copied from :any:`LocalParam`)
     gcm_dbPassword = gcm_dbPasswordLocal
 
-    #: size of DB connection pool + on/off switch
-    gcm_connectionPoolCount = 120
+    #: Min size of DB connection pool
+    gcm_connectionPoolMinCount = 30
+    #: Max size of DB connection pool
+    gcm_connectionPoolMaxCount = 50
 
     #: Flag to disable the connection pool feature. If `True` then new connection creation on each request
     gcm_noConnectionPool = True

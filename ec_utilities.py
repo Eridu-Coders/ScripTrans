@@ -12,6 +12,8 @@ import datetime
 import time
 import pytz
 import smtplib
+import psycopg2.pool
+import threading
 
 # -------------------------------------- Logging Set-up ----------------------------------------------------------------
 class EcLogger(logging.Logger):
@@ -139,7 +141,7 @@ class EcLogger(logging.Logger):
 
 
 # -------------------------------------- e-mail messages sending -------------------------------------------------------
-class EcMailer:
+class EcMailer(threading.Thread):
     """
     Sends an e-mail through smtp. Can handle the following servers:
 
@@ -160,17 +162,31 @@ class EcMailer:
     #: List of previously sent messages with timestamps, to avoid sending too many (min. 5min. deep).
     cm_sendMailGovernor = None
 
+    #: Concurrency management lock to control access to :any:`cm_sendMailGovernor` This is necessary
+    #: because each mail sending operation is executed asynchronously in its own thread
+    cm_mutexGovernor = None
+
+    #: Concurrency management lock to control access to the log files (see :any:`sendMail`). This is necessary
+    #: because each mail sending operation is executed asynchronously in its own thread
+    cm_mutexFiles = None
+
     @classmethod
     def initMailer(cls):
         """
-        Mail system intialization. Creates an empty :any:`EcMailer.cm_sendMailGovernor`
+        Mail system intialization. Creates an empty :any:`cm_sendMailGovernor` and the associated
+        Mutexes to allow critical section protection.
         """
         cls.cm_sendMailGovernor = dict()
+        cls.cm_mutexGovernor = threading.Lock()
+        cls.cm_mutexFiles = threading.Lock()
 
     @classmethod
     def sendMail(cls, p_subject, p_message):
         """
-        Sends an e-mail message. Every sent message goes into a text file
+        Sends an e-mail message asynchronously (each call executed in its own thread) to avoid
+        blocking the main application flow while waiting for the SMTP server to respond.
+
+        Every sent message goes into a text file
         (same path as :any:`EcAppParam.gcm_logFile` but with 'all_msg' at the end instead of 'csv')
 
         Ensures that no more than 10 message with the same subject are sent every 5 minutes
@@ -183,11 +199,33 @@ class EcMailer:
         Yet another file receives the messages which could not ne sent due to these errors (same path as
         :any:`EcAppParam.gcm_logFile` but with 'rejected_msg' at the end instead of 'csv')
 
-        All these files are appended to (open mode ``'a'``) Nothing is ever removed from them.
+        All these files are appended to (open mode ``'a'``) Nothing is ever removed from them. Any
+        write access to them is protected by a mutex because of the asynchronous nature of the operations (several
+        e-mail messages may be in the process of being sent in parallel)
 
         :param p_subject: Message subject.
         :param p_message: Message body.
         """
+        l_thread = EcMailer(p_subject, p_message)
+        l_thread.start()
+
+    def __init__(self, p_subject, p_message):
+        """
+        preparing the thread to be launched (by :any:`sendMail`)
+
+        :param p_subject: same as in :any:`sendMail`
+        :param p_message: same as in :any:`sendMail`
+        """
+        self.m_subject = p_subject
+        self.m_message = p_message
+
+        super().__init__()
+
+    def run(self):
+        """
+        Actual e-mail sending process (executed in separate thread)
+        """
+
         # message context with headers and body
         l_message = """From: {0}
             To: {1}
@@ -199,18 +237,20 @@ class EcMailer:
             EcAppParam.gcm_mailSender,
             ', '.join(EcAppParam.gcm_mailRecipients),
             email.utils.format_datetime(datetime.datetime.now(tz=pytz.utc)),
-            p_subject,
-            p_message
+            self.m_subject,
+            self.m_message
         )
 
         # removes spaces at the begining of lines
         l_message = re.sub('^[ \t\r\f\v]+', '', l_message, flags=re.MULTILINE)
 
         # limitation of email sent
+        EcMailer.cm_mutexGovernor.acquire()
+        #### cm_sendMailGovernor CRITICAL SECTION START ######
         l_now = time.time()
         try:
             # the list of all UNIX timestamps when this subject was sent in the previous 5 min at least
-            l_thisSubjectHistory = cls.cm_sendMailGovernor[p_subject]
+            l_thisSubjectHistory = EcMailer.cm_sendMailGovernor[self.m_subject]
         except KeyError:
             l_thisSubjectHistory = [l_now]
 
@@ -223,21 +263,27 @@ class EcMailer:
                 l_count += 1
                 l_thisSubjectHistoryNew.append(l_pastsend)
 
-        cls.cm_sendMailGovernor[p_subject] = l_thisSubjectHistoryNew
+        EcMailer.cm_sendMailGovernor[self.m_subject] = l_thisSubjectHistoryNew
+        #### cm_sendMailGovernor CRITICAL SECTION END ######
+        EcMailer.cm_mutexGovernor.release()
 
         # maximum : 10 with the same subject every 5 minutes
         if l_count > 10:
             # overflow stored the message in a separate file
+            EcMailer.cm_mutexFiles.acquire()
             l_fLog = open(re.sub('\.csv', '.overflow_msg', EcAppParam.gcm_logFile), 'a')
             l_fLog.write('>>>>>>>\n' + l_message)
             l_fLog.close()
+            EcMailer.cm_mutexFiles.release()
             return
 
         # all messages
         l_fLogName = re.sub('\.csv', '.all_msg', EcAppParam.gcm_logFile)
+        EcMailer.cm_mutexFiles.acquire()
         l_fLog = open(l_fLogName, 'a')
         l_fLog.write('>>>>>>>\n' + l_message)
         l_fLog.close()
+        EcMailer.cm_mutexFiles.release()
 
         # numeric value indicating the steps in the authentication process, for debug purposes
         l_stepPassed = 0
@@ -265,7 +311,6 @@ class EcMailer:
                 # Gmail / TLS authentication
 
                 # smtp client init
-                #l_smtpObj = smtplib.SMTP(EcAppParam.gcm_smtpServer, 587)
                 l_smtpObj = smtplib.SMTP(EcAppParam.gcm_smtpServer, 587)
                 l_stepPassed = 201
 
@@ -290,6 +335,7 @@ class EcMailer:
                 l_smtpObj.quit()
         except smtplib.SMTPException as l_exception:
             # if failure, stores the message in a separate file
+            EcMailer.cm_mutexFiles.acquire()
             l_fLog = open(re.sub('\.csv', '.rejected_msg', EcAppParam.gcm_logFile), 'a')
             l_fLog.write('>>>>>>>\n' + l_message)
             l_fLog.close()
@@ -303,13 +349,49 @@ class EcMailer:
                     type(l_exception).__name__,
                     re.sub('\s+', ' ', repr(l_exception)),
                     l_stepPassed
-                ))
+                )
+            )
             l_fLog.close()
+            EcMailer.cm_mutexFiles.release()
         except Exception as e:
+            EcMailer.cm_mutexFiles.acquire()
             l_fLog = open(l_fLogName, 'a')
-            l_fLog.write('!!!!! {0}-"{1}" [Step = {2}]\n'.format(
-                type(e).__name__,
-                re.sub('\s+', ' ', repr(e)),
-                l_stepPassed
-            ))
+            l_fLog.write(
+                '!!!!! {0}-"{1}" [Step = {2}]\n'.format(
+                    type(e).__name__,
+                    re.sub('\s+', ' ', repr(e)),
+                    l_stepPassed
+                )
+            )
             l_fLog.close()
+            EcMailer.cm_mutexFiles.release()
+
+
+# ----------------- Database connection pool ---------------------------------------------------------------------------
+class EcConnectionPool(psycopg2.pool.ThreadedConnectionPool):
+    """
+    Database connection handling class. Uses Postgres (`psycopg2 <http://initd.org/psycopg/>`_)
+    """
+
+    def __init__(self, p_minconn, p_maxconn, *args, **kwargs):
+        # logger
+        self.m_logger = logging.getLogger('ConnectionPool')
+
+        self.m_logger.info('args : [{0}] kwargs : [{1}]'.format(
+            repr(args), repr(kwargs)
+        ))
+
+        super().__init__(p_minconn, p_maxconn, *args, **kwargs)
+
+    def getconn(self, p_key=None):
+        l_newConn = super().getconn(p_key)
+
+        return l_newConn
+
+    # why do I get a PyCharm warning here ?!
+    # It works fine.
+    def putconn(self, p_conn, p_key=None, p_close=False):
+        super().putconn(p_conn, p_key, p_close)
+
+    def closeall(self):
+        super().closeall()
