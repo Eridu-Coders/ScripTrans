@@ -7,6 +7,12 @@ Application startup
 .. automodule:: ScripTrans
    :members:
 
+Application core root class
+---------------------------
+
+.. automodule:: ec_app_core
+   :members:
+
 Utilities proper
 ----------------
 
@@ -15,3 +21,4 @@ Utilities proper
 
 .. autoclass:: EcMailer
    :members:
+

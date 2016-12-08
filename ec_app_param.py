@@ -12,6 +12,7 @@ class EcAppParam:
     """
 
     # transfer of local params from LocalParam to EcAppParam
+    gcm_prodEnv = LocalParam.gcm_prodEnv
     gcm_appDomain = LocalParam.gcm_appDomain
     gcm_httpPort = LocalParam.gcm_httpPort
     gcm_dbServer = LocalParam.gcm_dbServer

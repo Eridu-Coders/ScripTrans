@@ -5,6 +5,9 @@ class LocalParam:
     Static class containing the global parameters which (may) depend on the environment (dev/qualif/prod).
     """
 
+    #: True --> Production environment
+    gcm_prodEnv = False
+
     # HTTP server parameters
     #: domain name (= 'localhost' except fro prod environment)
     gcm_appDomain = 'localhost'

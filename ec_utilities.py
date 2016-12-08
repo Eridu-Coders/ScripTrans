@@ -13,6 +13,8 @@ import time
 import pytz
 import smtplib
 import psycopg2.pool
+import psycopg2
+import psycopg2.extensions
 import threading
 
 # -------------------------------------- Logging Set-up ----------------------------------------------------------------
@@ -103,7 +105,10 @@ class EcLogger(logging.Logger):
             def format(self, p_record):
                 l_formatted = super().format(p_record)
 
+                # this test is located here and not in the CSV formatter so that it does not get to be performed
+                # needlessly for every debug message
                 if p_record.levelno >= logging.WARNING:
+                    # send mail
                     EcMailer.sendMail(
                         '{0}-{1}[{2}]/{3}'.format(
                             p_record.levelname,
@@ -112,6 +117,46 @@ class EcLogger(logging.Logger):
                             p_record.funcName),
                         l_formatted
                     )
+
+                    # log message in TB_EC_MSG
+                    l_conn = psycopg2.connect(
+                        host=EcAppParam.gcm_dbServer,
+                        database=EcAppParam.gcm_dbDatabase,
+                        user=EcAppParam.gcm_dbUser,
+                        password=EcAppParam.gcm_dbPassword
+                    )
+                    l_cursor = l_conn.cursor()
+                    try:
+                        l_cursor.execute("""
+                            insert into "TB_EC_MSG"(
+                                "ST_NAME",
+                                "ST_LEVEL",
+                                "ST_MODULE",
+                                "ST_FILENAME",
+                                "ST_FUNCTION",
+                                "N_LINE",
+                                "TX_MSG"
+                            )
+                            values(%s, %s, %s, %s, %s, %s, %s);
+                        """, (
+                            p_record.name,
+                            p_record.levelname,
+                            p_record.module,
+                            p_record.pathname,
+                            p_record.funcName,
+                            p_record.lineno,
+                            re.sub('\s+', ' ', p_record.msg)
+                        ))
+                        l_conn.commit()
+                    except Exception as e:
+                        EcMailer.sendMail('TB_EC_MSG insert failure: {0}-{1}'.format(
+                            type(e).__name__,
+                            repr(e)
+                        ), 'Sent from EcConsoleFormatter')
+                        raise
+
+                    l_cursor.close()
+                    l_conn.close()
 
                 return l_formatted
 
@@ -373,6 +418,18 @@ class EcConnectionPool(psycopg2.pool.ThreadedConnectionPool):
     Database connection handling class. Uses Postgres (`psycopg2 <http://initd.org/psycopg/>`_)
     """
 
+    @classmethod
+    def getNew(cls):
+        return EcConnectionPool(
+            EcAppParam.gcm_connectionPoolMinCount
+            , EcAppParam.gcm_connectionPoolMaxCount
+            , host=EcAppParam.gcm_dbServer
+            , database=EcAppParam.gcm_dbDatabase
+            , user=EcAppParam.gcm_dbUser
+            , password=EcAppParam.gcm_dbPassword
+            , connection_factory=EcConnection
+    )
+
     def __init__(self, p_minconn, p_maxconn, *args, **kwargs):
         # logger
         self.m_logger = logging.getLogger('ConnectionPool')
@@ -381,17 +438,63 @@ class EcConnectionPool(psycopg2.pool.ThreadedConnectionPool):
             repr(args), repr(kwargs)
         ))
 
+        self.m_connectionRegister = []
+        self.m_getCalls = 0
+        self.m_putCalls = 0
         super().__init__(p_minconn, p_maxconn, *args, **kwargs)
 
-    def getconn(self, p_key=None):
+    def getconn(self, p_debugData, p_key=None):
+        self.m_getCalls += 1
         l_newConn = super().getconn(p_key)
+        l_newConn.debugData = p_debugData
+        self.m_connectionRegister.append(l_newConn)
 
         return l_newConn
 
-    # why do I get a PyCharm warning here ?!
-    # It works fine.
     def putconn(self, p_conn, p_key=None, p_close=False):
+        # why do I get a PyCharm warning here ?!
+        # It works fine and it matches the method signature given by the autocomplete
+
+        self.m_putCalls += 1
+        self.m_connectionRegister.remove(p_conn)
+
         super().putconn(p_conn, p_key, p_close)
 
     def closeall(self):
         super().closeall()
+
+    def connectionReport(self):
+        l_report = '[{0}] get/put: {1}/{2}\n'.format(
+            datetime.datetime.now(tz=pytz.utc),
+            self.m_getCalls, self.m_putCalls
+        )
+
+        for l_conn in self.m_connectionRegister:
+            l_report += l_conn.debugData + '\n'
+
+        return l_report
+
+class EcConnection(psycopg2.extensions.connection):
+    """
+    A wrapper class around
+    `psycopg2.extensions.connection <http://initd.org/psycopg/docs/advanced.html#connection-and-cursor-factories>`_
+    adding the necessary data for connection usage tracking and debugging (especially when connections are
+    not properly released).
+    """
+    cm_IDCounter = 0
+
+    def __init__(self, dsn, *more):
+        self.m_debugData = 'Fresh'
+        self.m_creationDate = datetime.datetime.now(tz=pytz.utc)
+        self.m_connectionID = EcConnection.cm_IDCounter
+        EcConnection.cm_IDCounter += 1
+
+        super().__init__(dsn, *more)
+
+    @property
+    def debugData(self):
+        return '[{0}] {1}-{2}'.format(self.m_debugData, self.m_creationDate, self.m_debugData)
+
+    @debugData.setter
+    def debugData(self, p_debugData):
+        self.m_debugData = p_debugData
