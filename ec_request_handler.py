@@ -8,5 +8,5 @@ import http.server
 # ----------------------------------------- New Request Handler --------------------------------------------------------
 class EcRequestHandler(http.server.SimpleHTTPRequestHandler):
     """
-    HTTP request handler
+    HTTP request handler. Subclass of :any:`http.server.SimpleHTTPRequestHandler` from python std. lib.
     """

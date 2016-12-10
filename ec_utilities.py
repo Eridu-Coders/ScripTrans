@@ -239,12 +239,12 @@ class EcMailer(threading.Thread):
         (same path as :any:`EcAppParam.gcm_logFile` but with 'overflow_msg' at the end instead of 'csv')
 
         Errors encountered during processing are stored in a dedicated file (same path as
-        :any:`EcAppParam.gcm_logFile` but with 'smtp_error' at the end instead of 'csv')
+        :any:`EcAppParam.gcm_logFile` but with `'smtp_error'` at the end instead of `'csv'`)
         This file is in CSV format so that it can be merged with the main CSV log file.
         Yet another file receives the messages which could not ne sent due to these errors (same path as
         :any:`EcAppParam.gcm_logFile` but with 'rejected_msg' at the end instead of 'csv')
 
-        All these files are appended to (open mode ``'a'``) Nothing is ever removed from them. Any
+        All these files are appended to only (open mode ``'a'``) Nothing is ever removed from them. Any
         write access to them is protected by a mutex because of the asynchronous nature of the operations (several
         e-mail messages may be in the process of being sent in parallel)
 
@@ -268,7 +268,7 @@ class EcMailer(threading.Thread):
 
     def run(self):
         """
-        Actual e-mail sending process (executed in separate thread)
+        Actual e-mail sending process (executed in a dedicated thread)
         """
 
         # message context with headers and body
@@ -415,7 +415,9 @@ class EcMailer(threading.Thread):
 # ----------------- Database connection pool ---------------------------------------------------------------------------
 class EcConnectionPool(psycopg2.pool.ThreadedConnectionPool):
     """
-    Database connection handling class. Uses Postgres (`psycopg2 <http://initd.org/psycopg/>`_)
+    Database connection handling class. Uses PostgreSQL (`psycopg2 <http://initd.org/psycopg/>`_).
+    `EcConnectionPool` is built as a subclass of psycopg2's
+    `ThreadedConnectionPool <http://pythonhosted.org/psycopg2/pool.html>`_
     """
 
     @classmethod
@@ -431,7 +433,22 @@ class EcConnectionPool(psycopg2.pool.ThreadedConnectionPool):
     )
 
     def __init__(self, p_minconn, p_maxconn, *args, **kwargs):
-        # logger
+        """
+        Creates the member attributes needed for debug purposes:
+
+        * `m_connectionRegister`: list of all db connections "out there"
+        * `m_getCalls` number of calls to :any:`EcConnectionPool.getconn`
+        * `m_putCalls` number of calls to :any:`EcConnectionPool.putconn`
+
+        :param p_minconn: Minimum number of connections
+            (parameter of `ThreadedConnectionPool <http://pythonhosted.org/psycopg2/pool.html>`_ constructor).
+        :param p_maxconn: Maximum number of connections
+            (parameter of `ThreadedConnectionPool <http://pythonhosted.org/psycopg2/pool.html>`_ constructor).
+        :param args: Other positional arguments
+            (parameter of `ThreadedConnectionPool <http://pythonhosted.org/psycopg2/pool.html>`_ constructor).
+        :param kwargs: Other keyword arguments
+            (parameter of `ThreadedConnectionPool <http://pythonhosted.org/psycopg2/pool.html>`_ constructor).
+        """
         self.m_logger = logging.getLogger('ConnectionPool')
 
         self.m_logger.info('args : [{0}] kwargs : [{1}]'.format(
@@ -444,6 +461,21 @@ class EcConnectionPool(psycopg2.pool.ThreadedConnectionPool):
         super().__init__(p_minconn, p_maxconn, *args, **kwargs)
 
     def getconn(self, p_debugData, p_key=None):
+        """
+        Get a connection from the pool. Overrides the `getconn` method of
+        `ThreadedConnectionPool <http://pythonhosted.org/psycopg2/pool.html>`_
+        but adds an argument to pass debug data.
+
+        Beyond calling the method from the parent class, this method does the following:
+
+        * increment the `m_getCalls` counter.
+        * pass the debug data string to the newly available connection.
+        * adds the connection to 'm_connectionRegister'.
+
+        :param p_debugData: An identification string for debug purposes.
+        :param p_key: parameter of the parent class method.
+        :return: a connection from the pool, wrapped as an :any:`EcConnection`
+        """
         self.m_getCalls += 1
         l_newConn = super().getconn(p_key)
         l_newConn.debugData = p_debugData
@@ -452,11 +484,26 @@ class EcConnectionPool(psycopg2.pool.ThreadedConnectionPool):
         return l_newConn
 
     def putconn(self, p_conn, p_key=None, p_close=False):
+        """
+        Returns a connection to the pool.
+
+        :param p_conn: the connection being returned.
+        :param p_key: parameter of the parent class method.
+        :param p_close: parameter of the parent class method.
+
+        Beyond calling the method from the parent class, this method does the following:
+
+        * increment the `m_putCalls` counter.
+        * remove the connection from 'm_connectionRegister'.
+
+        """
         # why do I get a PyCharm warning here ?!
-        # It works fine and it matches the method signature given by the autocomplete
+        # It works fine and it matches the method signature given by the autocomplete.
+        # For getconn, it is normal (added p_debugData) but not here.
 
         self.m_putCalls += 1
         self.m_connectionRegister.remove(p_conn)
+        p_conn.resetDebugData()
 
         super().putconn(p_conn, p_key, p_close)
 
@@ -464,6 +511,12 @@ class EcConnectionPool(psycopg2.pool.ThreadedConnectionPool):
         super().closeall()
 
     def connectionReport(self):
+        """
+        Uses the debug data contained in all outstanding connections (listed in `m_connectionRegister`)
+        to produce a report string (1 connection per line).
+
+        :return: The report string.
+        """
         l_report = '[{0}] get/put: {1}/{2}\n'.format(
             datetime.datetime.now(tz=pytz.utc),
             self.m_getCalls, self.m_putCalls
@@ -481,9 +534,22 @@ class EcConnection(psycopg2.extensions.connection):
     adding the necessary data for connection usage tracking and debugging (especially when connections are
     not properly released).
     """
+
+    #: global sequence to assign unique IDs to all instances of the class
     cm_IDCounter = 0
 
     def __init__(self, dsn, *more):
+        """
+        Beyond calling the parent constructor, this method does the following:
+
+        * assigns the string 'Fresh' to `m_debugData` (so that if a connection is later seen with this string, it means
+            that it was not obtained through the pool -- see :any:`EcConnectionPool.getconn` )
+        * assigns the current date/time to `m_creationDate`
+        * assigns a new ID to `m_connectionID` and increments `EcConnection.cm_IDCounter`
+
+        :param dsn: parameter of the parent constructor.
+        :param more:  parameter of the parent constructor.
+        """
         self.m_debugData = 'Fresh'
         self.m_creationDate = datetime.datetime.now(tz=pytz.utc)
         self.m_connectionID = EcConnection.cm_IDCounter
@@ -493,8 +559,25 @@ class EcConnection(psycopg2.extensions.connection):
 
     @property
     def debugData(self):
+        """
+        A property to get and set the debug data. When, setting, it simply results in an assignment to `m_debugData`
+        but when getting, the attribute returns a descriptive string containing the ID and the creation date in
+        addition to the debug data proper. This string is used to create :any:`EcConnectionPool.connectionReport`
+        """
         return '[{0}] {1}-{2}'.format(self.m_debugData, self.m_creationDate, self.m_debugData)
 
     @debugData.setter
     def debugData(self, p_debugData):
-        self.m_debugData = p_debugData
+        self.m_debugData += '/' + p_debugData
+
+    def resetDebugData(self):
+        """
+        When a connection is put back into the pool, its debug data is reset by :any:`EcConnectionPool.putconn`
+        Its value is set to `'Used'` (contrasting with `'Fresh'` as set by the constructor)
+
+        As a result, the debug data of a connection looks like `'Fresh/XXXX'` if it is the first time it is used
+        or `'Used/XXXX'` if the connection has been returned back to the pool at least once. In both cases,
+        `'XXXX'` is the debug data string set in :any:`EcConnectionPool.getconn`
+
+        """
+        self.m_debugData = 'Used'
