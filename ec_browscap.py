@@ -11,6 +11,7 @@ import sys
 import urllib.request
 import urllib.error
 import os.path
+import re
 from io import StringIO
 
 from ec_utilities import EcLogger
@@ -122,6 +123,98 @@ class BrowscapCache:
                 l_cacheRows.append(BrowscapCache.replace_defaults(l_line, l_defaults))
 
         self.m_logger.info('Size taken by l_cacheRows: {0:,} bytes'.format(sys.getsizeof(l_cacheRows)))
+
+        l_chromeStandard = 0
+        l_chromeElse = 0
+        l_firefoxStandard = 0
+        l_firefoxElse = 0
+        l_ieStandard = 0
+        l_ieElse = 0
+        l_operaStandard = 0
+        l_operaElse = 0
+        l_ucStandard = 0
+        l_ucElse = 0
+        for l_row in l_cacheRows:
+            l_ua = l_row['propertyname']
+            l_browser = l_row['browser'].lower()
+            # Mozilla/5.0 (*Windows NT 6.3*Win64? x64**********************) AppleWebKit/* (KHTML* like Gecko) Chrome/50.*Safari/*
+            # Mozilla/5.0 (*Linux*Android?4.2*Nexus 5 Build/***************) AppleWebKit/* (KHTML* like Gecko*) Chrome/55.*Safari/*
+            # Mozilla/5.0 (*Linux*Android?4.1*Ergo Tab Crystal Lite Build/*) AppleWebKit/*(KHTML,*like Gecko) Chrome/55.*Safari/*
+            # Mozilla/5.0 (*Linux x86**************************************) AppleWebKit/* (KHTML,*like Gecko) Chrome/55.*
+            # Mozilla/5.0 (*Linux*Android?5.0******************************)*AppleWebKit/* (KHTML* like Gecko) Chrome/54.*Safari/*
+            # Mozilla/5.0(*Linux*Android?4.4*Fly IQ4409 Quad Build/*) AppleWebKit/*(KHTML* like Gecko) Chrome/54.*Safari/*
+            # Mozilla/5.0 (*Windows NT 10.0*WOW64*) AppleWebKit/* (KHTML* like Gecko) Chrome/*Anonymisiert durch*
+            # Mozilla/5.0 (iPad*CPU iPhone OS 3?0* like Mac OS X*) AppleWebKit/* (KHTML* like Gecko) *CriOS/55.*Safari/*
+            # Mozilla/5.0 (*Linux*Android?4.0*HTC_Sensation Build/*) AppleWebKit/* (KHTML* like Gecko)*CrMo/51.*Safari/*
+            if l_browser.lower() == 'chrome':
+                if re.search(
+                        'Mozilla/5\.0(\s|)\(.*\).*AppleWebKit/.*\(KHTML.*like\sGecko.*\)(\s|)(Chrome|.*CriOS|.*CrMo)/(\d+\.|).*', l_ua):
+                    #print('Match:' + l_ua)
+                    l_chromeStandard += 1
+                else:
+                    #print('Chrome No Match:' + l_ua)
+                    l_chromeElse += 1
+
+            # Mozilla/5.0 (*Windows NT 5.0; *WOW64*) Gecko* Firefox/46.0*
+            # Mozilla/4.0 (*Windows NT 10.0*WOW64*) Gecko* Firefox/50.0*
+            # Mozilla/5.0 (*Windows NT 6.4*rv:50.0*) Gecko*/
+            # Mozilla/5.0 (Tablet; rv:37.0*)*Gecko*Firefox/37.0*
+            if l_browser.lower() == 'firefox':
+                if re.search('Mozilla/\d\.0\s\(.*\).*Gecko.*(Firefox/\d+\.\d+.*|)', l_ua):
+                    # print('Match:' + l_ua)
+                    l_firefoxStandard += 1
+                else:
+                    # print('Firefox No Match:' + l_ua)
+                    l_firefoxElse += 1
+
+            # Mozilla/5.0 (compatible; MSIE 7.0; *Windows NT 6.1*Win64? x64*Trident/4.0*Mozilla/4.0 (compatible; MSIE 6.0*
+            # Mozilla/5.0 (compatible; MSIE 7.*Windows NT 6.0*Trident/6.0*)*
+            if l_browser.lower() == 'ie':
+                if re.search('Mozilla/(\d\.0|\.*).*\(.*MSIE\s\d+\.(\d+|).*', l_ua):
+                    # print('Match:' + l_ua)
+                    l_ieStandard += 1
+                else:
+                    # print('IE No Match:' + l_ua)
+                    l_ieElse += 1
+
+            # Mozilla/5.0 (*Windows NT 6.2*Win64? x64*) AppleWebKit/* (KHTML, like Gecko)*Chrome/*Safari/*OPR/35.0*
+            # Mozilla/5.0 (*Windows NT 6.2*Win64? x64*) AppleWebKit/* (KHTML, like Gecko)*Chrome/*Safari/*OPR/*
+            # Opera/9.80*(*Windows NT 5.2*)*Version/*
+            # Mozilla/?.*(*Mac OS X 10?10*)*Opera?3.00*
+            # Mozilla/5.0 (compatible; MSIE *Windows NT 6.2*Win64? x64*)*Opera*
+            if l_browser.lower() == 'opera':
+                if re.search('.*Opera.*', l_ua):
+                    # print('Match:' + l_ua)
+                    l_operaStandard += 1
+                else:
+                    # print('Opera No Match:' + l_ua)
+                    l_operaElse += 1
+
+            # Mozilla/5.0 (*Linux*Android?5.0* Build/*) AppleWebKit/* (KHTML, like Gecko) Version/* UCBrowser/10.7* U3/* Safari/*
+            # Mozilla/5.0 (*Linux*Android?2.3*) AppleWebKit/* (KHTML,*like Gecko*) UCBrowser/2.3*Safari/*
+            # Mozilla/5.0 (*CPU iPhone OS 9?0* like Mac OS X*)*AppleWebKit/*(*KHTML* like Gecko*)*UCBrowser/*
+            if l_browser.lower() == 'uc browser':
+                if re.search('.*(UCBrowser|UCWEB).*', l_ua):
+                    # print('Match:' + l_ua)
+                    l_ucStandard += 1
+                else:
+                    print('UC No Match:' + l_ua)
+                    l_ucElse += 1
+
+        print('l_chromeStandard  : {0}'.format(l_chromeStandard))
+        print('l_chromeElse      : {0}'.format(l_chromeElse))
+
+        print('l_firefoxStandard : {0}'.format(l_firefoxStandard))
+        print('l_firefoxElse     : {0}'.format(l_firefoxElse))
+
+        print('l_ieStandard      : {0}'.format(l_ieStandard))
+        print('l_ieElse          : {0}'.format(l_ieElse))
+
+        print('l_operaStandard   : {0}'.format(l_operaStandard))
+        print('l_operaElse       : {0}'.format(l_operaElse))
+
+        print('l_ucStandard      : {0}'.format(l_ucStandard))
+        print('l_ucElse          : {0}'.format(l_ucElse))
 
     def downloadCSVFile(self, p_url_file, p_pathCsv, p_timeout=60, p_proxy=None, p_additional_handlers=None):
         """
@@ -301,6 +394,27 @@ class BrowscapCache:
 
 
 # ---------------------------------------------------- Test section ----------------------------------------------------
+def reTest():
+    # Mozilla / 5.0(*MSIE 10.0 * Windows * Trident / 6.0 *) *
+    # Mozilla\s/\s5\.0\(.*MSIE\s\d+\.\d+.*\).*
+    for l_ua in ['Mozilla/5.0 (*Windows NT 6.3*Win64? x64*) AppleWebKit/* (KHTML, like Gecko) Chrome/50.*Safari/*',
+        'Mozilla/5.0 (*Linux*Android?4.1*GT-N8000 Build/*) AppleWebKit/* (KHTML* like Gecko) Chrome/55.*Safari/*',
+        'Mozilla/5.0 (*Linux*Android?4.0*Archos 80 Xenon Build/*) AppleWebKit/* (KHTML* like Gecko) Chrome/55.*Safari/*',
+        'Mozilla/5.0 (*Windows NT 5.2*) AppleWebKit/* (KHTML* like Gecko) Chrome/55.*Chrome anonymized by*',
+        'Mozilla/5.0 (*Windows NT 6.1*WOW64*) AppleWebKit/* (KHTML* like Gecko) Chrome/55.*']:
+        if re.search('Mozilla/5\.0\s\(.*\)\sAppleWebKit/.*\s\(KHTML.*\slike\sGecko\)\sChrome/\d+\..*', l_ua):
+            print('match    :' + l_ua)
+        else:
+            print('no match :' + l_ua)
+
+
+    for l_ua in ['Mozilla / 5.0(*MSIE 10.0 * Windows * Trident / 6.0 *) *']:
+        if re.search('Mozilla\s/\s5\.0\(.*MSIE\s\d+\.\d+.*\).*', l_ua):
+            print('match    :' + l_ua)
+        else:
+            print('no match :' + l_ua)
+
 if __name__ == "__main__":
     EcLogger.logInit()
+    #reTest()
     l_browscapCache = BrowscapCache('./browscap.csv')
