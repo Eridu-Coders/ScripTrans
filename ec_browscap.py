@@ -158,13 +158,14 @@ class BrowscapCache:
 
     def initCacheMedium(self):
         l_deltaVer = 6
+        l_browserList = ['Chrome', 'Safari', 'IE', 'Opera', 'Firefox']
         self.m_cachePrecompiled = []
         l_maxVer = dict()
         for l_row in self.m_cacheRows:
             l_browser = l_row['browser']
             l_ver = l_row['majorver']
 
-            if l_browser not in ['Chrome', 'Safari', 'IE', 'Opera', 'Firefox', 'UC Browser']:
+            if l_browser not in l_browserList:
                 continue
 
             try:
@@ -183,7 +184,7 @@ class BrowscapCache:
             l_browser = l_row['browser']
             l_ver = l_row['majorver']
 
-            if l_browser not in ['Chrome', 'Safari', 'IE', 'Opera', 'Firefox', 'UC Browser']:
+            if l_browser not in l_browserList:
                 continue
 
             if l_maxVer[l_browser] - l_ver < l_deltaVer:
