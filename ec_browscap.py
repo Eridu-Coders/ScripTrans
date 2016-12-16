@@ -13,6 +13,7 @@ import urllib.error
 import os.path
 import re
 import time
+import operator
 from io import StringIO
 
 from ec_utilities import EcLogger
@@ -139,6 +140,7 @@ class BrowscapCache:
 
         self.initCacheMedium()
         self.initCacheFast()
+        self.initCacheHeavy()
 
     @staticmethod
     def uaPattern2re(p_uaPattern):
@@ -146,6 +148,104 @@ class BrowscapCache:
         l_re = l_re.replace('\\?', '.').replace('\\*', '.*?')
 
         return l_re
+
+    def idBrowserAnalytic(self, p_ua):
+        l_browser = 'Unknown'
+        l_platform = 'Unknown'
+
+        l_match  = re.search('((Mozilla|Opera|UCWEB)/\d+\.\d+)(\s|)\(([^\)]*)\)(.*)', p_ua)
+        if l_match:
+            l_head = l_match.group(1)
+            l_body = l_match.group(4)
+            l_tail = l_match.group(5)
+
+            #print('{0}/{1}/{2}'.format(l_head, l_body, l_tail))
+
+            l_tailL = l_tail.lower()
+            l_bodL = l_body.lower()
+
+            if re.search('opera|opr', l_tailL) or re.search('opera', l_head.lower()):
+                l_browser = 'Opera'
+            elif re.search('edge', l_tailL):
+                l_browser = 'Edge'
+            elif re.search('fxios', l_tailL):
+                l_browser = 'Firefox'
+            elif re.search('ucbrowser', l_tailL):
+                l_browser = 'UC Browser'
+            elif re.search('msie', l_bodL):
+                l_browser = 'IE'
+            elif re.search('chromium', l_tailL):
+                l_browser = 'Chromium'
+            elif re.search('chrome|crios|crmo', l_tailL):
+                l_browser = 'Chrome'
+            elif re.search('safari', l_tailL):
+                l_browser = 'Safari'
+            elif re.search('windows.*trident', l_bodL):
+                l_browser = 'IE'
+            elif re.search('firefox', l_tailL):
+                l_browser = 'Firefox'
+            elif re.search('gecko', l_tailL):
+                l_browser = 'Firefox'
+
+            if re.search('android', l_bodL):
+                l_platform = 'Android'
+                if l_browser == 'Safari':
+                    l_browser = 'Android'
+            elif re.search('iphone\sos', l_bodL):
+                l_platform = 'iOS'
+            elif re.search('ipad', l_bodL):
+                l_platform = 'iOS'
+            elif re.search('cros', l_bodL):
+                l_platform = 'ChromeOS'
+            elif re.search('windows\snt\s5', l_bodL):
+                l_platform = 'WinXP'
+            elif re.search('windows\snt\s6\.0', l_bodL):
+                l_platform = 'WinVista'
+            elif re.search('windows\snt\s6\.1', l_bodL):
+                l_platform = 'Win7'
+            elif re.search('windows\snt\s6\.2', l_bodL):
+                l_platform = 'Win8'
+            elif re.search('windows\snt\s6\.3', l_bodL):
+                l_platform = 'Win8.1'
+            elif re.search('windows\snt\s10', l_bodL):
+                l_platform = 'Win10'
+            elif re.search('windows', l_bodL):
+                l_platform = 'Windows'
+            elif re.search('mac\sos\sx', l_bodL):
+                l_platform = 'MacOSX'
+            elif re.search('ubuntu', l_bodL):
+                l_platform = 'Ubuntu'
+            elif re.search('linux', l_bodL):
+                l_platform = 'Linux'
+
+
+        if re.search('safari.*darwin', p_ua.lower()):
+            l_browser = 'Safari'
+            l_platform = 'iOS'
+
+        if re.search('facebookexternalhit|FBAN|FBAV|FBBV|FBRV|FBDV|FBSN|FBSV|FBSS|FBCR|FBIOS', p_ua):
+            l_browser = 'Facebook'
+
+        if re.search('bot|spider|crawl|curl|wget|python|phantomjs', p_ua.lower()):
+            l_browser = 'Bot'
+            l_platform = ''
+
+        return l_browser, l_platform
+
+    def initCacheHeavy(self):
+        self.m_cachePrecompiledHeavy = []
+
+        for l_row in self.m_cacheRows:
+            l_re = BrowscapCache.uaPattern2re(l_row['propertyname'])
+            self.m_cachePrecompiledHeavy.append((re.compile(l_re), l_row))
+
+    def idBrowserHeavy(self, p_ua):
+        if 'm_cachePrecompiledHeavy' not in self.__dict__:
+            self.initCacheHeavy()
+
+        for l_reCompiled, l_row in self.m_cachePrecompiledHeavy:
+            if l_reCompiled.search(p_ua):
+                return Browscap(l_row)
 
     def idBrowserSlow(self, p_ua):
         for l_row in self.m_cacheRows:
@@ -242,7 +342,7 @@ class BrowscapCache:
             if l_reCompiled.search(p_ua):
                 return l_browser
 
-        return None
+        return 'Unknows'
 
     def testMainBrowsers(self):
         l_chromeStandard = 0
@@ -552,7 +652,19 @@ def reTest():
         else:
             print('no match :' + l_ua)
 
+def printSortedDict(p_dict):
+    for l_key, l_val in sorted(p_dict.items(), key=operator.itemgetter(1)):
+        print('{0:<30} : {1}'.format(l_key, l_val))
+
 if __name__ == "__main__":
+    l_uaList = []
+    with open('TB_UA.txt', 'r') as l_uaFile:
+        for l_rowUA in l_uaFile:
+            l_match = re.search('(.*);(.*)', l_rowUA)
+            if l_match:
+                l_ua = l_match.group(1)
+                l_uaList.append(l_ua)
+
     EcLogger.logInit()
     #reTest()
     t0 = time.perf_counter()
@@ -562,28 +674,64 @@ if __name__ == "__main__":
     print('Load : {0:.2f} s.'.format(l_totalTime))
 
     #l_browscapCache.testMainBrowsers()
+    # [
+    #   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_10_5) AppleWebKit/601.7.8 (KHTML, like Gecko) Version/9.1.3 Safari/601.7.8',
+    #   'Mozilla/5.0 (Windows NT 6.1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/50.0.2661.102 Safari/537.36',
+    #   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.8; rv:48.0) Gecko/20100101 Firefox/48.0']
 
-    for l_ua in [
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_10_5) AppleWebKit/601.7.8 (KHTML, like Gecko) Version/9.1.3 Safari/601.7.8',
-        'Mozilla/5.0 (Windows NT 6.1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/50.0.2661.102 Safari/537.36',
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.8; rv:48.0) Gecko/20100101 Firefox/48.0']:
+    l_misBrowser = dict()
+    l_misBot = dict()
+    l_misPlatform = dict()
+    l_uaCounter = 0
+    for l_ua in l_uaList:
+        print('[{0}] {1}'.format(l_uaCounter, l_ua))
+        l_uaCounter += 1
 
-        print(l_ua)
+        #t0 = time.perf_counter()
+        #l_bro = l_browscapCache.idBrowserFastAndDirty(l_ua)
+        #t1 = time.perf_counter()
+        #l_totalTime = t1-t0
+        #print('Fast  : {0:f} s. / {1}'.format(l_totalTime, l_bro))
 
         t0 = time.perf_counter()
-        l_bro = l_browscapCache.idBrowserFastAndDirty(l_ua)
+        l_brA, l_ptfA = l_browscapCache.idBrowserAnalytic(l_ua)
         t1 = time.perf_counter()
         l_totalTime = t1-t0
-        print('Fast : {0:f} s. / {1}'.format(l_totalTime, l_bro))
+        print('Anal. : {0:f} s. --> {1}/{2}'.format(l_totalTime, l_brA, l_ptfA))
 
         t0 = time.perf_counter()
-        l_br = l_browscapCache.idBrowserMedium(l_ua)
+        l_br = l_browscapCache.idBrowserHeavy(l_ua)
+        l_brB = l_br.browser if l_br is not None else 'Unknown'
+        l_ptfB = l_br.platform if l_br is not None else 'Unknown'
         t1 = time.perf_counter()
         l_totalTime = t1-t0
-        print('Med. : {0:f} s. / {1}'.format(l_totalTime, l_br.browser if l_br is not None else 'Unknown'))
+        print('Heavy : {0:f} s. --> {1}/{2}'.format(l_totalTime, l_brB, l_ptfB))
 
-        t0 = time.perf_counter()
-        l_br = l_browscapCache.idBrowserSlow(l_ua)
-        t1 = time.perf_counter()
-        l_totalTime = t1-t0
-        print('Slow : {0:.2f} s. / {1}'.format(l_totalTime, l_br.browser if l_br is not None else 'Unknown'))
+        if l_brA != l_brB:
+            l_key = l_brA + '/' + l_brB
+
+            if l_brA == 'Bot':
+                try:
+                    l_misBot[l_key] += 1
+                except KeyError:
+                    l_misBot[l_key] = 1
+            else:
+                try:
+                    l_misBrowser[l_key] += 1
+                except KeyError:
+                    l_misBrowser[l_key] = 1
+
+        if l_ptfA != l_ptfB:
+            l_key = l_ptfA + '/' + l_ptfB
+            try:
+                l_misPlatform[l_key] += 1
+            except KeyError:
+                l_misPlatform[l_key] = 1
+
+    print('----- Browsers ---------------------')
+    printSortedDict(l_misBrowser)
+    print('----- Bots -------------------------')
+    printSortedDict(l_misBot)
+    print('----- Platforms --------------------')
+    printSortedDict(l_misPlatform)
+
